@@ -25,7 +25,7 @@ const Root = {
       this.props = props;
     }
 
-    Constructor.prototype.render = spec.render;
+    Constructor.prototype = Object.assign(Constructor.prototype, spec);
 
     return Constructor;
   },
@@ -40,7 +40,7 @@ const Root = {
      * **/
     const wrapperElement = this.createElement(TopLevelWrapper, element);
     const componentInstance = new RootCompositeComponentWrapper(wrapperElement);
-    return componentInstance.mountComponent(container);
+    return componentInstance.mountComponent(componentInstance, container);
   }
 };
 
@@ -84,15 +84,46 @@ class RootCompositeComponentWrapper {
   mountComponent(container) {
     const Component = this._currentElement.type;
     const componentInstance = new Component(this._currentElement.props);
-    let element = componentInstance.render();
+    this._instance = componentInstance;
 
-    while (typeof element.type === 'function') {
-      element = (new element.type(element.props)).render();
+    if (componentInstance.componentWillMount) {
+      componentInstance.componentWillMount();
     }
 
-    const domComponentInstance = new RootDOMComponent(element);
-    return domComponentInstance.mountComponent(container);
+    const markup = this.performInitialMount(container);
+
+    if (componentInstance.componentDidMount) {
+      componentInstance.componentDidMount();
+    }
+
+    return markup;
+  }
+
+  performInitialMount(container) {
+    const renderedElement = this._instance.render();
+
+    const child = instantiateRootComponent(renderedElement);
+    this._renderedComponent = child;
+
+    return RootReconciler.mountComponent(child, container);
   }
 }
+
+const RootReconciler = {
+  // now responsible for mounting
+  mountComponent(internalInstance, container) {
+    return internalInstance.mountComponent(container);
+  }
+};
+
+function instantiateRootComponent(element) {
+  if (typeof element.type === 'string') {
+    return new RootDOMComponent(element);
+  } else if (typeof element.type === 'function') {
+    return new RootCompositeComponentWrapper(element);
+  }
+}
+
+
 
 export default Root;
