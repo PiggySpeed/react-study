@@ -38,11 +38,38 @@ const Root = {
      * @param container -
      * @returns {any} -
      * **/
-    const wrapperElement = this.createElement(TopLevelWrapper, element);
-    const componentInstance = new RootCompositeComponentWrapper(wrapperElement);
-    return componentInstance.mountComponent(componentInstance, container);
+    const prevComponent = getTopLevelComponentInContainer(container);
+    if (prevComponent) {
+      return updateRootComponent(
+        prevComponent,
+        element
+      );
+    } else {
+      return renderNewRootComponent(element, container);
+    }
   }
 };
+
+function renderNewRootComponent(element, container) {
+  const wrapperElement = Root.createElement(TopLevelWrapper);
+  const componentInstance = new RootCompositeComponentWrapper(wrapperElement);
+  const markUp = RootReconciler.mountComponent(
+    componentInstance,
+    container
+  );
+
+  container.__rootComponentInstance = componentInstance._renderedComponent;
+
+  return markUp;
+}
+
+function getTopLevelComponentInContainer(container) {
+  return container.__rootComponentInstance;
+}
+
+function updateRootComponent(prevComponent, nextElement) {
+  RootReconciler.receiveComponent(prevComponent, nextElement);
+}
 
 class RootDOMComponent {
   constructor(element) {
@@ -65,6 +92,48 @@ class RootDOMComponent {
 
     this._hostNode = domElement;
     return domElement;
+  }
+
+  receiveComponent(next) {
+    const prevElement = this._currentElement;
+    this.updateComponent(prevElement, nextElement);
+  }
+
+  updateComponent(prevElement, nextElement) {
+    const lastProps = prevElement.props;
+    const nextProps = nextElement.props;
+
+    this._updateDOMProperties(lastProps, nextProps);
+    this._updateDOMChildren(lastProps, nextProps);
+
+    this._currentElement = nextElement;
+  }
+
+  _updateDOMProperties(lastProps, nextProps) {
+    // mostly concerned with updating CSS styles
+  }
+
+  _updateDOMChildren(lastProps, nextProps) {
+    const lastContent = lastProps.children;
+    const nextContent = nextProps.children;
+
+    if (!nextContent) {
+      this.updateTextContent('');
+    } else if (lastContent !== nextContent) {
+      this.updateTextContent('' + nextContent);
+    }
+  }
+
+  updateTextContent(text) {
+    const node = this._hostNode;
+    const firstChild = node.firstChild;
+
+    if (firstChild && firstChild === node.lastChild && firstChild.nodeType === 3) {
+      firstChild.nodeValue = text;
+      return;
+    }
+
+    node.textContent = text;
   }
 }
 
@@ -107,12 +176,61 @@ class RootCompositeComponentWrapper {
 
     return RootReconciler.mountComponent(child, container);
   }
+
+  receiveComponent(nextElement) {
+    const prevElement = this._currentElement;
+    this.updateComponent(prevElement, nextElement);
+  }
+
+  updateComponent(prevElement, nextElement) {
+    const nextProps = nextElement.props;
+    const inst = this._instance;
+
+    if (inst.componentWillReceiveProps) {
+      inst.componentWillReceiveProps(nextProps);
+    }
+
+    let shouldUpdate = true;
+
+    if (inst.shouldComponentUpdate) {
+      shouldUpdate = inst.shouldComponentUpdate(nextProps);
+    }
+
+    if (shouldUpdate) {
+      this._performComponentUpdate(nextElement, nextProps);
+    } else {
+      // if skipping update, still need to set lastest props
+      inst.props = nextProps;
+    }
+  }
+
+  _performComponentUpdate(nextElement, nextProps) {
+    this._currentElement = nextElement;
+    const inst = this._instance;
+
+    inst.props = nextProps;
+
+    this._updateRenderedComponent();
+  }
+
+  _updateRenderedComponent() {
+    const prevComponentInstance = this._renderedComponent;
+    const inst = this._instance;
+    const nextRenderedElement = inst.render();
+
+    RootReconciler.receiveComponent(prevComponentInstance, nextRenderedElement);
+  }
+
 }
 
 const RootReconciler = {
   // now responsible for mounting
   mountComponent(internalInstance, container) {
     return internalInstance.mountComponent(container);
+  },
+
+  receiveComponent(internalInstance, nextElement) {
+    internalInstance.receiveComponent(nextElement);
   }
 };
 
